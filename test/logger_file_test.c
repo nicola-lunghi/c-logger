@@ -63,7 +63,7 @@ static int test_fileLogger(void)
     return 0;
 }
 
-int main(int argc, char* argv[])
+int main(void)
 {
     setup();
     nu_run_test(test_initFailed);

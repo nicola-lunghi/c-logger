@@ -8,7 +8,8 @@ int main(int argc, char* argv[]) {
         printf("usage: %s <conf file>\n", argv[0]);
         return 1;
     }
-    strncpy(filename, argv[1], strlen(argv[1]));
+    strncpy(filename, argv[1], sizeof(filename) - 1);
+    filename[sizeof(filename) - 1] = '\0'; /* Ensure null termination */
 
     logger_configure(filename);
     LOG_TRACE("trace");

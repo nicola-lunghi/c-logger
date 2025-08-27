@@ -1,8 +1,10 @@
 #include "logger.h"
+#include <unistd.h>  /* For usleep */
 #if defined(_WIN32) || defined(_WIN64)
  #include <windows.h>
 #else
- #include <unistd.h>
+ /* Explicit declaration for usleep if not declared by unistd.h */
+ extern int usleep(unsigned int microseconds);
  #define Sleep(n) usleep((n) * 1000)
 #endif /* defined(_WIN32) || defined(_WIN64) */
 

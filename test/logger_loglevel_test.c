@@ -98,7 +98,7 @@ static int test_fatal(void)
     return 0;
 }
 
-int main(int argc, char* argv[])
+int main(void)
 {
     nu_run_test(test_trace);
     nu_run_test(test_debug);

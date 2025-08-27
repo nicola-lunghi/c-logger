@@ -1,16 +1,18 @@
 #include "logger.h"
+#include "platform_config.h"
+#include "logger_platform.h"
 #include <assert.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <string.h>
+
+#ifdef HAVE_SYS_TIME_H
+#include <sys/time.h>
+#endif
+
+#ifdef HAVE_TIME_H
 #include <time.h>
-#if defined(_WIN32) || defined(_WIN64)
- #include <winsock2.h>
-#else
- #include <pthread.h>
- #include <sys/time.h>
- #include <sys/syscall.h>
- #include <unistd.h>
-#endif /* defined(_WIN32) || defined(_WIN64) */
+#endif
 
 enum {
     /* Logger type */
@@ -40,45 +42,23 @@ static struct {
 static volatile int s_logger;
 static volatile LogLevel s_logLevel = LogLevel_INFO;
 static volatile long s_flushInterval = 0; /* msec, 0 is auto flush off */
-static volatile int s_initialized = 0; /* false */
-#if defined(_WIN32) || defined(_WIN64)
-static CRITICAL_SECTION s_mutex;
-#else
-static pthread_mutex_t s_mutex;
-#endif /* defined(_WIN32) || defined(_WIN64) */
 
 static void init(void)
 {
-    if (s_initialized) {
-        return;
-    }
-#if defined(_WIN32) || defined(_WIN64)
-    InitializeCriticalSection(&s_mutex);
-#else
-    pthread_mutex_init(&s_mutex, NULL);
-#endif /* defined(_WIN32) || defined(_WIN64) */
-    s_initialized = 1; /* true */
+    logger_platform_init();
 }
 
 static void lock(void)
 {
-#if defined(_WIN32) || defined(_WIN64)
-    EnterCriticalSection(&s_mutex);
-#else
-    pthread_mutex_lock(&s_mutex);
-#endif /* defined(_WIN32) || defined(_WIN64) */
+    logger_platform_lock();
 }
 
 static void unlock(void)
 {
-#if defined(_WIN32) || defined(_WIN64)
-    LeaveCriticalSection(&s_mutex);
-#else
-    pthread_mutex_unlock(&s_mutex);
-#endif /* defined(_WIN32) || defined(_WIN64) */
+    logger_platform_unlock();
 }
 
-#if defined(_WIN32) || defined(_WIN64)
+#if defined(PLATFORM_WINDOWS)
 static int gettimeofday(struct timeval* tv, void* tz)
 {
     const UINT64 epochFileTime = 116444736000000000ULL;
@@ -97,26 +77,7 @@ static int gettimeofday(struct timeval* tv, void* tz)
     tv->tv_usec = t % 1000000;
     return 0;
 }
-
-static struct tm* localtime_r(const time_t* timep, struct tm* result)
-{
-    localtime_s(result, timep);
-    return result;
-}
-#endif /* defined(_WIN32) || defined(_WIN64) */
-
-static long getCurrentThreadID(void)
-{
-#if defined(_WIN32) || defined(_WIN64)
-    return GetCurrentThreadId();
-#elif __linux__
-    return syscall(SYS_gettid);
-#elif defined(__APPLE__) && defined(__MACH__)
-    return syscall(SYS_thread_selfid);
-#else
-    return (long) pthread_self();
-#endif /* defined(_WIN32) || defined(_WIN64) */
-}
+#endif /* PLATFORM_WINDOWS */
 
 int logger_initConsoleLogger(FILE* output)
 {
@@ -139,12 +100,12 @@ static long getFileSize(const char* filename)
     FILE* fp;
     long size;
 
-    if ((fp = fopen(filename, "rb")) == NULL) {
+    if ((fp = logger_platform_fopen(filename, "rb")) == NULL) {
         return 0;
     }
-    fseek(fp, 0, SEEK_END);
-    size = ftell(fp);
-    fclose(fp);
+    logger_platform_fseek(fp, 0, SEEK_END);
+    size = logger_platform_ftell(fp);
+    logger_platform_fclose(fp);
     return size;
 }
 
@@ -164,15 +125,16 @@ int logger_initFileLogger(const char* filename, long maxFileSize, unsigned char 
     init();
     lock();
     if (s_flog.output != NULL) { /* reinit */
-        fclose(s_flog.output);
+        logger_platform_fclose(s_flog.output);
     }
-    s_flog.output = fopen(filename, "a");
+    s_flog.output = logger_platform_fopen(filename, "a");
     if (s_flog.output == NULL) {
-        fprintf(stderr, "ERROR: logger: Failed to open file: `%s`\n", filename);
+        logger_platform_error("ERROR: logger: Failed to open file: `%s`\n", filename);
         goto cleanup;
     }
     s_flog.currentFileSize = getFileSize(filename);
-    strncpy(s_flog.filename, filename, sizeof(s_flog.filename));
+    strncpy(s_flog.filename, filename, sizeof(s_flog.filename) - 1);
+    s_flog.filename[sizeof(s_flog.filename) - 1] = '\0'; /* Ensure null termination */
     s_flog.maxFileSize = (maxFileSize > 0) ? maxFileSize : kDefaultMaxFileSize;
     s_flog.maxBackupFiles = maxBackupFiles;
     s_logger |= kFileLogger;
@@ -209,16 +171,16 @@ static int hasFlag(int flags, int flag)
 
 void logger_flush()
 {
-    if (s_logger == 0 || !s_initialized) {
+    if (s_logger == 0 || !logger_platform_is_initialized()) {
         assert(0 && "logger is not initialized");
         return;
     }
 
     if (hasFlag(s_logger, kConsoleLogger)) {
-        fflush(s_clog.output);
+        logger_platform_flush(s_clog.output);
     }
     if (hasFlag(s_logger, kFileLogger)) {
-        fflush(s_flog.output);
+        logger_platform_flush(s_flog.output);
     }
 }
 
@@ -235,18 +197,6 @@ static char getLevelChar(LogLevel level)
     }
 }
 
-static void getTimestamp(const struct timeval* time, char* timestamp, size_t size)
-{
-    time_t sec = time->tv_sec; /* a necessary variable to avoid a runtime error on Windows */
-    struct tm calendar;
-
-    assert(size >= 25);
-
-    localtime_r(&sec, &calendar);
-    strftime(timestamp, size, "%y-%m-%d %H:%M:%S", &calendar);
-    sprintf(&timestamp[17], ".%06ld", (long) time->tv_usec);
-}
-
 static void getBackupFileName(const char* basename, unsigned char index,
         char* backupname, size_t size)
 {
@@ -257,7 +207,9 @@ static void getBackupFileName(const char* basename, unsigned char index,
     strncpy(backupname, basename, size);
     if (index > 0) {
         sprintf(indexname, ".%d", index);
-        strncat(backupname, indexname, strlen(indexname));
+        /* Calculate available space: total size - current length - 1 for null terminator */
+        size_t available_space = size - strlen(backupname) - 1;
+        strncat(backupname, indexname, available_space);
     }
 }
 
@@ -265,10 +217,10 @@ static int isFileExist(const char* filename)
 {
     FILE* fp;
 
-    if ((fp = fopen(filename, "r")) == NULL) {
+    if ((fp = logger_platform_fopen(filename, "r")) == NULL) {
         return 0;
     } else {
-        fclose(fp);
+        logger_platform_fclose(fp);
         return 1;
     }
 }
@@ -282,24 +234,24 @@ static int rotateLogFiles(void)
     if (s_flog.currentFileSize < s_flog.maxFileSize) {
         return s_flog.output != NULL;
     }
-    fclose(s_flog.output);
+    logger_platform_fclose(s_flog.output);
     for (i = (int) s_flog.maxBackupFiles; i > 0; i--) {
         getBackupFileName(s_flog.filename, i - 1, src, sizeof(src));
         getBackupFileName(s_flog.filename, i, dst, sizeof(dst));
         if (isFileExist(dst)) {
-            if (remove(dst) != 0) {
-                fprintf(stderr, "ERROR: logger: Failed to remove file: `%s`\n", dst);
+            if (logger_platform_remove(dst) != 0) {
+                logger_platform_error("ERROR: logger: Failed to remove file: `%s`\n", dst);
             }
         }
         if (isFileExist(src)) {
-            if (rename(src, dst) != 0) {
-                fprintf(stderr, "ERROR: logger: Failed to rename file: `%s` -> `%s`\n", src, dst);
+            if (logger_platform_rename(src, dst) != 0) {
+                logger_platform_error("ERROR: logger: Failed to rename file: `%s` -> `%s`\n", src, dst);
             }
         }
     }
-    s_flog.output = fopen(s_flog.filename, "a");
+    s_flog.output = logger_platform_fopen(s_flog.filename, "a");
     if (s_flog.output == NULL) {
-        fprintf(stderr, "ERROR: logger: Failed to open file: `%s`\n", s_flog.filename);
+        logger_platform_error("ERROR: logger: Failed to open file: `%s`\n", s_flog.filename);
         return 0;
     }
     s_flog.currentFileSize = getFileSize(s_flog.filename);
@@ -313,18 +265,18 @@ static long vflog(FILE* fp, char levelc, const char* timestamp, long threadID,
     int size;
     long totalsize = 0;
 
-    if ((size = fprintf(fp, "%c %s %ld %s:%d: ", levelc, timestamp, threadID, file, line)) > 0) {
+    if ((size = logger_platform_printf(fp, "%c %s %ld %s:%d: ", levelc, timestamp, threadID, file, line)) > 0) {
         totalsize += size;
     }
-    if ((size = vfprintf(fp, fmt, arg)) > 0) {
+    if ((size = logger_platform_vprintf(fp, fmt, arg)) > 0) {
         totalsize += size;
     }
-    if ((size = fprintf(fp, "\n")) > 0) {
+    if ((size = logger_platform_printf(fp, "\n")) > 0) {
         totalsize += size;
     }
     if (s_flushInterval > 0) {
-        if (currentTime - *flushedTime > s_flushInterval) {
-            fflush(fp);
+        if (currentTime - *flushedTime > (unsigned long long)s_flushInterval) {
+            logger_platform_flush(fp);
             *flushedTime = currentTime;
         }
     }
@@ -340,7 +292,7 @@ void logger_log(LogLevel level, const char* file, int line, const char* fmt, ...
     long threadID;
     va_list carg, farg;
 
-    if (s_logger == 0 || !s_initialized) {
+    if (s_logger == 0 || !logger_platform_is_initialized()) {
         assert(0 && "logger is not initialized");
         return;
     }
@@ -348,11 +300,26 @@ void logger_log(LogLevel level, const char* file, int line, const char* fmt, ...
     if (!logger_isEnabled(level)) {
         return;
     }
+#ifdef HAVE_GETTIMEOFDAY
     gettimeofday(&now, NULL);
+#else
+    {
+        time_t t = time(NULL);
+        now.tv_sec = t;
+        now.tv_usec = 0;
+    }
+#endif
     currentTime = now.tv_sec * 1000 + now.tv_usec / 1000;
     levelc = getLevelChar(level);
-    getTimestamp(&now, timestamp, sizeof(timestamp));
-    threadID = getCurrentThreadID();
+#ifdef HAVE_SYS_TIME_H
+    logger_platform_get_timestamp(&now, timestamp, sizeof(timestamp));
+#else
+    {
+        struct logger_timeval lt = {now.tv_sec, now.tv_usec};
+        logger_platform_get_timestamp(&lt, timestamp, sizeof(timestamp));
+    }
+#endif
+    threadID = logger_platform_get_current_thread_id();
     lock();
     if (hasFlag(s_logger, kConsoleLogger)) {
         va_start(carg, fmt);
@@ -374,5 +341,5 @@ void logger_log(LogLevel level, const char* file, int line, const char* fmt, ...
 void logger_exitFileLogger()
 {
     if (s_flog.output)
-        fclose(s_flog.output);
+        logger_platform_fclose(s_flog.output);
 }

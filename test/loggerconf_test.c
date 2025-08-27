@@ -30,7 +30,7 @@ static int test_configure_fileLogger(void)
     return 0;
 }
 
-int main(int argc, char* argv[])
+int main(void)
 {
     nu_run_test(test_configure_empty);
     nu_run_test(test_configure_consoleLogger);

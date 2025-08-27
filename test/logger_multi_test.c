@@ -1,10 +1,12 @@
 #include "logger.h"
 #include <stdio.h>
+#include <unistd.h>  /* For fileno */
 #if defined(_WIN32) || defined(_WIN64)
  #include <io.h>
 #else
  #include <fcntl.h>
- #include <unistd.h>
+ /* Explicit declaration for fileno if not declared by unistd.h */
+ extern int fileno(FILE *stream);
 #endif /* defined(_WIN32) || defined(_WIN64) */
 #include "nanounit.h"
 
@@ -99,7 +101,7 @@ static int checkOnlyOneLineWritten(const char* filename, const char* message)
     return 0;
 }
 
-int main(int argc, char* argv[])
+int main(void)
 {
     setup();
     nu_run_test(test_multiLogger);

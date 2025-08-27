@@ -1,0 +1,51 @@
+# Build artifacts
+CMakeFiles/
+CMakeCache.txt
+CTestTestfile.cmake
+Makefile
+cmake_install.cmake
+platform_config.h
+liblogger.a
+logger_platform_alt.h
+*.o
+*.o.d
+*.exe
+*.a
+*.so
+*.dll
+
+# Test executables
+test/logger_*_test
+
+# Build directories
+build-*/
+
+# CMake scratch filesakeFiles/
+CMakeCache.txt
+CTestTestfile.cmake
+Makefile
+cmake_install.cmake
+config.h
+liblogger.a
+logger_platform_alt.h
+*.o
+*.o.d
+*.exe
+*.a
+*.so
+*.dll
+
+# Test executables
+test/logger_*_test
+
+# Build directories
+build-*/
+
+# CMake scratch files
+CMakeScratch/
+progress.marks
+3.*/
+
+# Temporary files
+*.tmp
+*.log
