@@ -1,4 +1,5 @@
-#!/bin/sh
+#!/bin/bash
+set -euf -o pipefail
 
 VERSION='0.3.4'
 INSTALL_DIR='/usr/local'

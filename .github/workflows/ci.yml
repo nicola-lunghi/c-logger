@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential
+
+    - name: Build in debug mode
+      run: |
+        ./build.sh debug
+
+    - name: Compile project
+      run: |
+        cd build_debug
+        make
+
+    - name: Run tests
+      run: |
+        cd build_debug
+        make test
+
+    - name: Run cross-platform tests
+      run: |
+        cd test/cross-platform-testing
+        ./advanced-tests.sh
+        ./test-missing-headers.sh

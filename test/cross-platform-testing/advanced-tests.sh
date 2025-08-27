@@ -1,4 +1,6 @@
 #!/bin/bash
+set -euf -o pipefail
+
 # Advanced testing methods for missing headers
 
 echo "=== Method 2: Using -include to override config ==="

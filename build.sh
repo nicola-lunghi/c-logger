@@ -1,4 +1,5 @@
-#!/bin/sh
+#!/bin/bash
+set -euf -o pipefail
 
 BUILD_DIR="build"
 
